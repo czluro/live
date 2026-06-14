@@ -15,9 +15,6 @@ app.get('/live/:username', (req, res) => {
     const command = `yt-dlp --proxy "${proxyVN}" -g "${tiktokUrl}"`;
 
     exec(command, (error, stdout, stderr) => {
-        // ... (phần code bên dưới giữ nguyên) ...
-
-    exec(command, (error, stdout, stderr) => {
         if (error || !stdout) {
             console.error(`Lỗi bắt link cho ${username}:`, stderr);
             return res.status(404).send("Idol đang không live hoặc lỗi bóc link.");
