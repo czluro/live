@@ -2,33 +2,45 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// API tạo file M3U tự động cho Hội Quán
 app.get('/bongda.m3u', async (req, res) => {
     try {
-        // Gọi API gốc của web để lấy dữ liệu
+        // 1. HÚT FILE TĨNH TỪ GITHUB
+        // Đổi link này thành link file chứa các kênh tĩnh của ông
+        const githubStaticUrl = 'https://raw.githubusercontent.com/czluro/live/main/bongda.m3u'; 
+        let m3u = "";
+        try {
+            const gitRes = await fetch(githubStaticUrl);
+            if(gitRes.ok) {
+                m3u = await gitRes.text();
+            } else {
+                m3u = "#EXTM3U\n"; // Nếu lỗi thì vẫn tự sinh header chuẩn
+            }
+        } catch (e) {
+            m3u = "#EXTM3U\n";
+        }
+
+        // Đảm bảo file tĩnh có dấu xuống dòng ở cuối
+        if (!m3u.endsWith('\n')) m3u += '\n';
+
+        // 2. CÀO DỮ LIỆU ĐỘNG TỪ HỘI QUÁN
         const response = await fetch('https://sv.hoiquantv.xyz/api/v1/external/fixtures/unfinished');
         const result = await response.json();
 
-        // Bắt đầu viết nội dung file M3U
-        let m3u = "#EXTM3U\n";
-
+        // 3. NHỒI KÊNH HỘI QUÁN VÀO ĐUÔI FILE TĨNH
         if (result.success && result.data) {
             result.data.forEach(match => {
                 const title = match.title;
                 const status = match.isLive ? "[ĐANG LIVE]" : "[SẮP ĐÁ]";
                 const logo = match.homeTeam ? match.homeTeam.logoUrl : "";
 
-                // Kiểm tra xem trận đấu có gán BLV không
                 if (match.fixtureCommentators && match.fixtureCommentators.length > 0) {
-                    // Lặp qua từng phòng của các BLV trong trận đó
                     match.fixtureCommentators.forEach(room => {
                         if (room.commentator && room.commentator.streams && room.commentator.streams.length > 0) {
                             const blvName = room.commentator.nickname || room.commentator.name;
-                            // Thường ưu tiên lấy luồng đầu tiên (FHD)
                             const streamUrl = room.commentator.streams[0].sourceUrl;
 
-                            // Ép chuẩn M3U
-                            m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Trực Tiếp Bóng Đá", ${status} ${title} - ${blvName}\n`;
+                            // Nối chuỗi kênh mới vào
+                            m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Hội Quán", ${status} ${title} - ${blvName}\n`;
                             m3u += `${streamUrl}\n`;
                         }
                     });
@@ -36,19 +48,17 @@ app.get('/bongda.m3u', async (req, res) => {
             });
         }
 
-        // Định dạng Header để Tivi hiểu đây là file Playlist chứ không phải chữ web
+        // 4. TRẢ FILE TỔNG HỢP VỀ CHO TIVI
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
-        res.setHeader('Content-Disposition', 'inline; filename="hoiquan.m3u"');
-        
-        // Trả file về cho người xem
+        res.setHeader('Content-Disposition', 'inline; filename="tong_hop.m3u"');
         res.send(m3u);
 
     } catch (error) {
-        console.error("Lỗi khi cào API:", error);
+        console.error("Lỗi Server:", error);
         res.status(500).send("Lỗi tạo playlist IPTV");
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`Dynamic IPTV Server chạy tại port: ${PORT}`);
+    console.log(`Server Mixer chạy tại port: ${PORT}`);
 });
