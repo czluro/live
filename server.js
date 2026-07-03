@@ -4,80 +4,53 @@ const PORT = process.env.PORT || 3000;
 
 app.get('/bongda.m3u', async (req, res) => {
     try {
-        // 1. HÚT FILE TĨNH TỪ GITHUB (Thay link tĩnh của ông vào đây nếu cần)
-        const githubStaticUrl = 'https://raw.githubusercontent.com/czluro/live/main/bongda.m3u'; 
-        let m3u = "";
+        let m3u = "#EXTM3U\n";
+
+        // CẤU HÌNH HEADERS GIẢ DANH TRÌNH DUYỆT
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+            'Referer': 'https://sv2.tieulam1.xyz/'
+        };
+
+        // 1. CÀO DỮ LIỆU TỪ HỘI QUÁN
         try {
-            const gitRes = await fetch(githubStaticUrl);
-            if(gitRes.ok) {
-                m3u = await gitRes.text();
-            } else {
-                m3u = "#EXTM3U\n"; 
+            const resHQ = await fetch('https://sv.hoiquantv.xyz/api/v1/external/fixtures/unfinished');
+            const dataHQ = await resHQ.json();
+            if (dataHQ.success && dataHQ.data) {
+                dataHQ.data.forEach(match => {
+                    if (match.fixtureCommentators) {
+                        match.fixtureCommentators.forEach(room => {
+                            if (room.commentator && room.commentator.streams && room.commentator.streams.length > 0) {
+                                let url = room.commentator.streams.find(s => s.name === "HD")?.sourceUrl || room.commentator.streams[0].sourceUrl;
+                                m3u += `#EXTINF:-1 group-title="Hội Quán", ${match.title} - ${room.commentator.nickname}\n`;
+                                m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0...\n#EXTVLCOPT:http-referrer=https://sv.hoiquantv.xyz/\n${url}\n`;
+                            }
+                        });
+                    }
+                });
             }
-        } catch (e) {
-            m3u = "#EXTM3U\n";
-        }
+        } catch (e) { console.error("Lỗi Hội Quán"); }
 
-        if (!m3u.endsWith('\n')) m3u += '\n';
+        // 2. CÀO DỮ LIỆU TỪ TIÊU LÂM TV
+        try {
+            const resTL = await fetch('https://api.tlap17062026.com/matches/graph', { headers });
+            const dataTL = await resTL.json();
+            if (dataTL.data) {
+                dataTL.data.forEach(match => {
+                    // Tiêu Lâm TV trả về json trực tiếp theo cấu trúc thấy trong image_c226f6.png
+                    const title = `${match.team_1} vs ${match.team_2}`;
+                    const url = match.source_live;
+                    m3u += `#EXTINF:-1 group-title="Tiêu Lâm TV", ${title} - ${match.blv}\n`;
+                    m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0...\n#EXTVLCOPT:http-referrer=https://sv2.tieulam1.xyz/\n${url}\n`;
+                });
+            }
+        } catch (e) { console.error("Lỗi Tiêu Lâm"); }
 
-        // 2. CÀO DỮ LIỆU ĐỘNG TỪ HỘI QUÁN
-        const response = await fetch('https://sv.hoiquantv.xyz/api/v1/external/fixtures/unfinished');
-        const result = await response.json();
-
-        // 3. XỬ LÝ VÀ NHỒI KÊNH
-        if (result.success && result.data) {
-            result.data.forEach(match => {
-                const title = match.title;
-                const status = match.isLive ? "[ĐANG LIVE]" : "[SẮP ĐÁ]";
-                const logo = match.homeTeam ? match.homeTeam.logoUrl : "";
-                
-                // --- XỬ LÝ NGÀY GIỜ SANG MÚI GIỜ VIỆT NAM ---
-                let timeDisplay = "";
-                if (match.startTime) {
-                    const dateObj = new Date(match.startTime);
-                    // Ép sang múi giờ VN (GMT+7) vì server Render chạy giờ Mỹ
-                    const vnTime = new Date(dateObj.getTime() + (7 * 60 * 60 * 1000));
-                    
-                    const hours = String(vnTime.getUTCHours()).padStart(2, '0');
-                    const minutes = String(vnTime.getUTCMinutes()).padStart(2, '0');
-                    const day = String(vnTime.getUTCDate()).padStart(2, '0');
-                    const month = String(vnTime.getUTCMonth() + 1).padStart(2, '0');
-                    
-                    // Định dạng hiển thị: [10:00 03/07]
-                    timeDisplay = `[${hours}:${minutes} ${day}/${month}] `;
-                }
-
-                if (match.fixtureCommentators && match.fixtureCommentators.length > 0) {
-                    match.fixtureCommentators.forEach(room => {
-                        if (room.commentator && room.commentator.streams && room.commentator.streams.length > 0) {
-                            const blvName = room.commentator.nickname || room.commentator.name;
-                            const streamUrl = room.commentator.streams[0].sourceUrl;
-
-                            // Nối chuỗi thêm timeDisplay vào tên kênh
-                            m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Hội Quán", ${status} ${timeDisplay}${title} - ${blvName}\n`;
-                            
-                            // 2 DÒNG NÀY ĐỂ ÉP TIVI GIẢ DANH TRÌNH DUYỆT VƯỢT RÀO CDN CHỐNG TRỘM
-                            m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0\n`;
-                            m3u += `#EXTVLCOPT:http-referrer=https://sv.hoiquantv.xyz/\n`;
-
-                            m3u += `${streamUrl}\n`;
-                        }
-                    });
-                }
-            });
-        }
-
-        // 4. TRẢ VỀ TIVI
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
-        res.setHeader('Content-Disposition', 'inline; filename="tong_hop.m3u"');
         res.send(m3u);
-
     } catch (error) {
-        console.error("Lỗi Server:", error);
-        res.status(500).send("Lỗi tạo playlist IPTV");
+        res.status(500).send("Lỗi Server");
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server chạy tại port: ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server Mixer chạy tại port: ${PORT}`));
