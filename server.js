@@ -1,30 +1,54 @@
 const express = require('express');
-const { exec } = require('child_process');
 const app = express();
-// Lấy Port của Cloud cấp, nếu không có thì dùng 3000
-const PORT = process.env.PORT || 3000; 
+const PORT = process.env.PORT || 3000;
 
-app.get('/live/:username', (req, res) => {
-    const username = req.params.username;
-    const tiktokUrl = `https://www.tiktok.com/@${username}/live`;
+// API tạo file M3U tự động cho Hội Quán
+app.get('/bongda.m3u', async (req, res) => {
+    try {
+        // Gọi API gốc của web để lấy dữ liệu
+        const response = await fetch('https://sv.hoiquantv.xyz/api/v1/external/fixtures/unfinished');
+        const result = await response.json();
 
-    // Nhập cái IP:PORT Việt Nam ông vừa tìm được vào đây (chú ý định dạng http hoặc socks5)
-    const proxyVN = "http://115.74.159.232:1080"; 
+        // Bắt đầu viết nội dung file M3U
+        let m3u = "#EXTM3U\n";
 
-    // Thêm cờ --proxy vào lệnh yt-dlp
-    const command = `yt-dlp --proxy "${proxyVN}" -g "${tiktokUrl}"`;
+        if (result.success && result.data) {
+            result.data.forEach(match => {
+                const title = match.title;
+                const status = match.isLive ? "[ĐANG LIVE]" : "[SẮP ĐÁ]";
+                const logo = match.homeTeam ? match.homeTeam.logoUrl : "";
 
-    exec(command, (error, stdout, stderr) => {
-        if (error || !stdout) {
-            console.error(`Lỗi bắt link cho ${username}:`, stderr);
-            return res.status(404).send("Idol đang không live hoặc lỗi bóc link.");
+                // Kiểm tra xem trận đấu có gán BLV không
+                if (match.fixtureCommentators && match.fixtureCommentators.length > 0) {
+                    // Lặp qua từng phòng của các BLV trong trận đó
+                    match.fixtureCommentators.forEach(room => {
+                        if (room.commentator && room.commentator.streams && room.commentator.streams.length > 0) {
+                            const blvName = room.commentator.nickname || room.commentator.name;
+                            // Thường ưu tiên lấy luồng đầu tiên (FHD)
+                            const streamUrl = room.commentator.streams[0].sourceUrl;
+
+                            // Ép chuẩn M3U
+                            m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Trực Tiếp Bóng Đá", ${status} ${title} - ${blvName}\n`;
+                            m3u += `${streamUrl}\n`;
+                        }
+                    });
+                }
+            });
         }
 
-        const streamUrl = stdout.trim(); 
-        res.redirect(302, streamUrl); 
-    });
+        // Định dạng Header để Tivi hiểu đây là file Playlist chứ không phải chữ web
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+        res.setHeader('Content-Disposition', 'inline; filename="hoiquan.m3u"');
+        
+        // Trả file về cho người xem
+        res.send(m3u);
+
+    } catch (error) {
+        console.error("Lỗi khi cào API:", error);
+        res.status(500).send("Lỗi tạo playlist IPTV");
+    }
 });
 
 app.listen(PORT, () => {
-    console.log(`Server chạy tại port: ${PORT}`);
+    console.log(`Dynamic IPTV Server chạy tại port: ${PORT}`);
 });
