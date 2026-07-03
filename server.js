@@ -4,7 +4,7 @@ const PORT = process.env.PORT || 3000;
 
 app.get('/bongda.m3u', async (req, res) => {
     try {
-        // 1. HÚT FILE TĨNH TỪ GITHUB (Thay link của ông vào đây nếu cần)
+        // 1. HÚT FILE TĨNH TỪ GITHUB (Thay link tĩnh của ông vào đây nếu cần)
         const githubStaticUrl = 'https://raw.githubusercontent.com/czluro/live/main/bongda.m3u'; 
         let m3u = "";
         try {
@@ -55,6 +55,11 @@ app.get('/bongda.m3u', async (req, res) => {
 
                             // Nối chuỗi thêm timeDisplay vào tên kênh
                             m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Hội Quán", ${status} ${timeDisplay}${title} - ${blvName}\n`;
+                            
+                            // 2 DÒNG NÀY ĐỂ ÉP TIVI GIẢ DANH TRÌNH DUYỆT VƯỢT RÀO CDN CHỐNG TRỘM
+                            m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0\n`;
+                            m3u += `#EXTVLCOPT:http-referrer=https://sv.hoiquantv.xyz/\n`;
+
                             m3u += `${streamUrl}\n`;
                         }
                     });
