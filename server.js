@@ -1,4 +1,4 @@
-// DÒNG NÀY CỰC QUAN TRỌNG: Ép Node.js bỏ qua lỗi bảo mật SSL
+// Ép Node.js bỏ qua lỗi bảo mật SSL
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const express = require('express');
@@ -77,44 +77,42 @@ app.get('/bongda.m3u', async (req, res) => {
 
 
         // ==========================================
-        // 3. CÀO TIÊU LÂM TV (CHUYỂN SANG POST)
+        // 3. CÀO TIÊU LÂM TV (LẤY CẢ GỐC LẪN BLV)
         // ==========================================
         try {
             const tlBody = {
-                limit: 50, // Lấy hẳn 50 trận thay vì 9
+                limit: 50, 
                 page: 1,
                 order_asc: "start_date",
                 queries: [
-                    // Bỏ điều kiện is_top = true để lấy TẤT CẢ các trận
                     { field: "blv", type: "not_equal", value: null }
                 ]
             };
 
             const resTL = await fetch('https://api.tlap17062026.com/matches/graph', { 
-                method: 'POST', // Đổi sang POST
+                method: 'POST',
                 headers: { 
                     'accept': '*/*',
-                    'content-type': 'application/json', // Bắt buộc phải có
+                    'content-type': 'application/json',
                     'Referer': 'https://sv2.tieulam1.xyz/trang-chu' 
                 },
-                body: JSON.stringify(tlBody) // Chèn nội dung yêu cầu vào
+                body: JSON.stringify(tlBody) 
             });
             
             const dataTL = await resTL.json();
 
             if (dataTL.data) {
-                dataTL.data.forEach(match => {
+                for (const match of dataTL.data) {
                     const title = `${match.team_1} vs ${match.team_2}`;
-                    const url = match.source_live;
                     const logo = match.team_1_logo || "";
                     
+                    // Xử lý ngày giờ
                     let timeDisplay = "";
                     if (match.start_date) {
                         const dateParts = match.start_date.split(' '); 
                         if(dateParts.length === 2) {
                             const d = dateParts[0].split('-');
                             const t = dateParts[1].split(':');
-                            // Web này trả về "2026-07-03 03:00:00" UTC
                             const dateObj = new Date(Date.UTC(d[0], d[1]-1, d[2], t[0], t[1], t[2]));
                             const vnTime = new Date(dateObj.getTime() + (7 * 60 * 60 * 1000));
                             
@@ -126,11 +124,40 @@ app.get('/bongda.m3u', async (req, res) => {
                         }
                     }
 
-                    m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Tiêu Lâm TV", ${timeDisplay}${title} - ${match.blv}\n`;
-                    m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0\n`;
-                    m3u += `#EXTVLCOPT:http-referrer=https://sv2.tieulam1.xyz/\n`;
-                    m3u += `${url}\n`;
-                });
+                    // KÊNH 1: LUỒNG GỐC TỪ NHÀ ĐÀI (NẾU CÓ)
+                    if (match.source_live) {
+                        m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Tiêu Lâm TV", ${timeDisplay}${title} - Luồng Gốc\n`;
+                        m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0\n`;
+                        m3u += `#EXTVLCOPT:http-referrer=https://sv2.tieulam1.xyz/\n`;
+                        m3u += `${match.source_live}\n`;
+                    }
+
+                    // KÊNH 2: GỌI API BỐC LUỒNG BLV
+                    if (match.id) {
+                        try {
+                            const detailRes = await fetch(`https://api.tlap17062026.com/match/${match.id}/live`, {
+                                headers: {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+                                    'Referer': 'https://sv2.tieulam1.xyz/'
+                                }
+                            });
+                            const detailData = await detailRes.json();
+                            
+                            // Ưu tiên hd_1, không có thì lấy hd_2, hd_3
+                            const hdUrl = detailData.hd_1 || detailData.hd_2 || detailData.hd_3;
+                            
+                            // Đảm bảo không trùng với luồng gốc vừa add ở trên thì mới cho vào list
+                            if (hdUrl && hdUrl !== match.source_live) {
+                                m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Tiêu Lâm TV", ${timeDisplay}${title} - ${match.blv}\n`;
+                                m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0\n`;
+                                m3u += `#EXTVLCOPT:http-referrer=https://sv2.tieulam1.xyz/\n`;
+                                m3u += `${hdUrl}\n`;
+                            }
+                        } catch (err) {
+                            console.error(`Lỗi bốc link phụ Tiêu Lâm trận ${title}:`, err);
+                        }
+                    }
+                }
             }
         } catch (e) {
             console.error("Lỗi cào Tiêu Lâm:", e);
