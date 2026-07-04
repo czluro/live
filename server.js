@@ -1,4 +1,4 @@
-// Ép Node.js bỏ qua lỗi bảo mật SSL
+// DÒNG NÀY CỰC QUAN TRỌNG: Ép Node.js bỏ qua lỗi bảo mật SSL
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const express = require('express');
@@ -25,16 +25,18 @@ app.get('/proxy', async (req, res) => {
             headers: {
                 'User-Agent': fakeUserAgent,
                 'Referer': referer,
-                ...(origin && {'Origin': origin}) // Nhồi thêm Origin cho chắc cốp
+                ...(origin && {'Origin': origin})
             }
         });
         
         if (!response.ok) return res.status(response.status).send("Lỗi tải luồng");
 
         // 1. NẾU LÀ CỤC VIDEO HAY CHÌA KHÓA -> BƠM THẲNG VỀ TIVI LUÔN
-        if (!targetUrl.includes('.m3u8')) {
-            res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
-            // Biến stream thành buffer và đẩy qua mạng (Cách này an toàn nhất cho mọi bản Node.js)
+        if (!targetUrl.includes('.m3u') && !targetUrl.includes('.m3u8')) {
+            const contentType = response.headers.get('content-type');
+            if (contentType) res.setHeader('Content-Type', contentType);
+            
+            // Dùng arrayBuffer để chuyển tiếp video
             const arrayBuffer = await response.arrayBuffer();
             return res.send(Buffer.from(arrayBuffer));
         }
@@ -42,26 +44,23 @@ app.get('/proxy', async (req, res) => {
         // 2. NẾU LÀ FILE DANH SÁCH M3U8 -> BÓC VỎ VÀ CHÈN PROXY VÀO MỌI NGÓC NGÁCH
         let m3u8Text = await response.text();
         
-        const finalUrl = new URL(response.url);
-        const basePath = finalUrl.pathname.substring(0, finalUrl.pathname.lastIndexOf('/') + 1);
-        const baseUrl = `${finalUrl.protocol}//${finalUrl.host}${basePath}`;
-
         const lines = m3u8Text.split('\n');
         const newLines = lines.map(line => {
             let trimmed = line.trim();
             
-            // Xử lý chèn Proxy vào chìa khóa mã hóa (nếu có)
+            // Xử lý chèn Proxy vào chìa khóa mã hóa (AES-128)
             if (trimmed.startsWith('#EXT-X-KEY')) {
                 return trimmed.replace(/URI="(.*?)"/, (match, uri) => {
-                    let absUri = uri.startsWith('http') ? uri : baseUrl + uri;
+                    let absUri = new URL(uri, response.url).href; // Ép thành link tuyệt đối chuẩn
                     let proxiedUri = `https://${req.get('host')}/proxy?url=${encodeURIComponent(absUri)}&ref=${encodeURIComponent(referer)}`;
                     return `URI="${proxiedUri}"`;
                 });
             }
 
-            // Xử lý chèn Proxy vào mọi link con (cả video ts lẫn m3u8 phụ)
+            // BÍ KÍP ĐÂY: Xử lý chèn Proxy vào MỌI link con (Bao gồm cả cục video .ts)
             if (trimmed && !trimmed.startsWith('#')) {
-                let absoluteUrl = trimmed.startsWith('http') ? trimmed : baseUrl + trimmed;
+                let absoluteUrl = new URL(trimmed, response.url).href;
+                // BẮT BUỘC BỌC PROXY CHO MỌI FILE (Bao gồm cả .ts)
                 return `https://${req.get('host')}/proxy?url=${encodeURIComponent(absoluteUrl)}&ref=${encodeURIComponent(referer)}`;
             }
             return line;
@@ -70,6 +69,7 @@ app.get('/proxy', async (req, res) => {
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
         res.send(newLines.join('\n'));
     } catch (e) {
+        console.error("Lỗi tải proxy:", e);
         res.status(500).send("Lỗi Proxy");
     }
 });
