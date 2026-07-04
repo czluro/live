@@ -5,6 +5,9 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Chuỗi giả danh dùng chung để nhét vào đuôi link
+const fakeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0";
+
 app.get('/bongda.m3u', async (req, res) => {
     try {
         let m3u = "";
@@ -31,7 +34,7 @@ app.get('/bongda.m3u', async (req, res) => {
         // ==========================================
         try {
             const resHQ = await fetch('https://sv.hoiquantv.xyz/api/v1/external/fixtures/unfinished', { 
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0' } 
+                headers: { 'User-Agent': fakeUserAgent } 
             });
             const dataHQ = await resHQ.json();
 
@@ -64,10 +67,11 @@ app.get('/bongda.m3u', async (req, res) => {
                                 else streamUrl = room.commentator.streams[0].sourceUrl;
 
                                 if (streamUrl && typeof streamUrl === 'string' && streamUrl.startsWith('http')) {
+                                    // BÍ KÍP Ở ĐÂY: Nối đuôi |Referer=... vào thẳng link
+                                    const finalLink = `${streamUrl}|Referer=https://sv.hoiquantv.xyz/&User-Agent=${fakeUserAgent}`;
+                                    
                                     m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Hội Quán", ${timeDisplay}${title} - ${blvName}\n`;
-                                    m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0\n`;
-                                    m3u += `#EXTVLCOPT:http-referrer=https://sv.hoiquantv.xyz/\n`;
-                                    m3u += `${streamUrl}\n`;
+                                    m3u += `${finalLink}\n`;
                                 }
                             }
                         });
@@ -128,24 +132,22 @@ app.get('/bongda.m3u', async (req, res) => {
 
                     // LUỒNG GỐC NHÀ ĐÀI
                     if (match.source_live && typeof match.source_live === 'string' && match.source_live.startsWith('http')) {
+                        const finalSourceLink = `${match.source_live}|Referer=https://sv2.tieulam1.xyz/&User-Agent=${fakeUserAgent}`;
                         m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Tiêu Lâm TV", ${timeDisplay}${title} - Gốc Nhà Đài\n`;
-                        m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0\n`;
-                        m3u += `#EXTVLCOPT:http-referrer=https://sv2.tieulam1.xyz/\n`;
-                        m3u += `${match.source_live}\n`;
+                        m3u += `${finalSourceLink}\n`;
                     }
 
-                    // TỰ ĐỘNG LẮP LUỒNG BLV TỪ STREAM_KEY (Nhanh và chống block)
+                    // TỰ ĐỘNG LẮP LUỒNG BLV TỪ STREAM_KEY
                     let hdUrl = "";
                     if (match.stream_key) {
                         hdUrl = `https://pull.asynccdn.com/live/${match.stream_key}/index.m3u8`;
                     } else if (match.id) {
-                        // Phòng hờ xui xẻo mất stream_key thì mới thèm gọi API
                         try {
                             const detailRes = await fetch(`https://api.tlap17062026.com/match/${match.id}/live`, {
                                 method: 'GET',
                                 headers: {
                                     'accept': '*/*',
-                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+                                    'User-Agent': fakeUserAgent,
                                     'Referer': 'https://sv2.tieulam1.xyz/'
                                 }
                             });
@@ -156,12 +158,12 @@ app.get('/bongda.m3u', async (req, res) => {
                         } catch (err) {}
                     }
 
-                    // Lọc link HD sạch sẽ trước khi ghi
                     if (hdUrl && typeof hdUrl === 'string' && hdUrl.startsWith('http') && hdUrl !== match.source_live) {
+                        // BÍ KÍP Ở ĐÂY: Nối đuôi |Referer=... vào thẳng link
+                        const finalHdLink = `${hdUrl}|Referer=https://sv2.tieulam1.xyz/&User-Agent=${fakeUserAgent}`;
+                        
                         m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Tiêu Lâm TV", ${timeDisplay}${title} - ${safeBlv}\n`;
-                        m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0\n`;
-                        m3u += `#EXTVLCOPT:http-referrer=https://sv2.tieulam1.xyz/\n`;
-                        m3u += `${hdUrl}\n`;
+                        m3u += `${finalHdLink}\n`;
                     }
                 }
             }
