@@ -28,7 +28,8 @@ https://live.fptplay53.net/live/media/v9abr/live247-hls-avc/v9abr-avc1_5600000=1
 #EXTINF:-1 tvg-id="vtv10hd" group-title="VTV-Bịp" tvg-logo="https://raw.githubusercontent.com/vuminhthanh12/vuminhthanh12/refs/heads/main/VTV10.png", VTV10
 https://live.fptplay53.net/live/media/v10abr/live247-hls-avc/v10abr-avc1_5600000=10000-mp4a_131600=20000.m3u8
 
-
+#EXT-X-STREAM-INF:PROGRAM-ID=1, BANDWIDTH=2620000
+https://tfxa6go3nhcjtgczdncjqgrhugmmoqisgamubqphsha5dctznha5xpw.100ycdn.com/pull.asynccdn.com/live/e5b29d49cba34abbb1d123133b8fe71f/index.m3u8?wsSession=00661354fc8e44f3dd82fe80-178318605811465&wsIPSercert=00fe269aef36b6916913475b62c71953&wsBindIP=2&wsserid=1168159941867791187
 
 
 
