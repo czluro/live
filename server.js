@@ -5,11 +5,11 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Chuỗi giả danh
+// Chuỗi giả danh siêu cấp
 const fakeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 // =========================================================================
-// ROUTE PROXY: "CẦU NỐI" BÓC VỎ LINK M3U8 ĐỂ VƯỢT TƯỜNG LỬA CHO TIVI & VLC
+// ROUTE PROXY: BỌC 100% CẢ M3U8, VIDEO (.TS) VÀ CHÌA KHÓA GIẢI MÃ
 // =========================================================================
 app.get('/proxy', async (req, res) => {
     const targetUrl = req.query.url;
@@ -18,19 +18,30 @@ app.get('/proxy', async (req, res) => {
     if (!targetUrl) return res.status(400).send("Thiếu URL");
 
     try {
+        let origin = "";
+        try { origin = new URL(referer).origin; } catch(e) {}
+
         const response = await fetch(targetUrl, {
             headers: {
                 'User-Agent': fakeUserAgent,
                 'Referer': referer,
-                'Origin': referer
+                ...(origin && {'Origin': origin}) // Nhồi thêm Origin cho chắc cốp
             }
         });
         
         if (!response.ok) return res.status(response.status).send("Lỗi tải luồng");
 
+        // 1. NẾU LÀ CỤC VIDEO HAY CHÌA KHÓA -> BƠM THẲNG VỀ TIVI LUÔN
+        if (!targetUrl.includes('.m3u8')) {
+            res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+            // Biến stream thành buffer và đẩy qua mạng (Cách này an toàn nhất cho mọi bản Node.js)
+            const arrayBuffer = await response.arrayBuffer();
+            return res.send(Buffer.from(arrayBuffer));
+        }
+
+        // 2. NẾU LÀ FILE DANH SÁCH M3U8 -> BÓC VỎ VÀ CHÈN PROXY VÀO MỌI NGÓC NGÁCH
         let m3u8Text = await response.text();
         
-        // Phân tích link gốc để tạo địa chỉ tuyệt đối cho các file video (.ts)
         const finalUrl = new URL(response.url);
         const basePath = finalUrl.pathname.substring(0, finalUrl.pathname.lastIndexOf('/') + 1);
         const baseUrl = `${finalUrl.protocol}//${finalUrl.host}${basePath}`;
@@ -38,23 +49,24 @@ app.get('/proxy', async (req, res) => {
         const lines = m3u8Text.split('\n');
         const newLines = lines.map(line => {
             let trimmed = line.trim();
-            // Nếu là dòng chứa link (không bắt đầu bằng #)
+            
+            // Xử lý chèn Proxy vào chìa khóa mã hóa (nếu có)
+            if (trimmed.startsWith('#EXT-X-KEY')) {
+                return trimmed.replace(/URI="(.*?)"/, (match, uri) => {
+                    let absUri = uri.startsWith('http') ? uri : baseUrl + uri;
+                    let proxiedUri = `https://${req.get('host')}/proxy?url=${encodeURIComponent(absUri)}&ref=${encodeURIComponent(referer)}`;
+                    return `URI="${proxiedUri}"`;
+                });
+            }
+
+            // Xử lý chèn Proxy vào mọi link con (cả video ts lẫn m3u8 phụ)
             if (trimmed && !trimmed.startsWith('#')) {
-                // Biến link tương đối thành tuyệt đối
                 let absoluteUrl = trimmed.startsWith('http') ? trimmed : baseUrl + trimmed;
-                
-                // Nếu bên trong m3u8 này lại chứa m3u8 con, thì đút tiếp vào Proxy
-                if (absoluteUrl.includes('.m3u8')) {
-                    return `https://${req.get('host')}/proxy?url=${encodeURIComponent(absoluteUrl)}&ref=${encodeURIComponent(referer)}`;
-                } else {
-                    // Nếu là file video .ts, nhả thẳng cho Tivi xem (vì CDN không chặn đuôi .ts)
-                    return absoluteUrl;
-                }
+                return `https://${req.get('host')}/proxy?url=${encodeURIComponent(absoluteUrl)}&ref=${encodeURIComponent(referer)}`;
             }
             return line;
         });
 
-        // Trả file m3u8 đã được "làm phép" về cho Tivi
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
         res.send(newLines.join('\n'));
     } catch (e) {
@@ -64,11 +76,12 @@ app.get('/proxy', async (req, res) => {
 
 
 // =========================================================================
-// ROUTE CHÍNH: TẠO DANH SÁCH KÊNH (Đã nhúng qua Proxy)
+// ROUTE CHÍNH: TẠO DANH SÁCH KÊNH
 // =========================================================================
 app.get('/bongda.m3u', async (req, res) => {
     try {
         let m3u = "";
+        const renderHost = req.get('host'); 
 
         // 1. CỨU LẠI DANH SÁCH TV BÌNH THƯỜNG
         const githubStaticUrl = 'https://raw.githubusercontent.com/czluro/live/main/bongda.m3u'; 
@@ -78,8 +91,6 @@ app.get('/bongda.m3u', async (req, res) => {
             else m3u = "#EXTM3U\n"; 
         } catch (e) { m3u = "#EXTM3U\n"; }
         if (!m3u.endsWith('\n')) m3u += '\n';
-
-        const renderHost = req.get('host'); // Tự động lấy tên miền Render của ông
 
         // 2. CÀO HỘI QUÁN
         try {
@@ -117,7 +128,6 @@ app.get('/bongda.m3u', async (req, res) => {
                                 else streamUrl = room.commentator.streams[0].sourceUrl;
 
                                 if (streamUrl && typeof streamUrl === 'string' && streamUrl.startsWith('http')) {
-                                    // Bọc link Hội Quán qua Proxy
                                     const safeLink = `https://${renderHost}/proxy?url=${encodeURIComponent(streamUrl)}&ref=${encodeURIComponent('https://sv.hoiquantv.xyz/')}`;
                                     m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Hội Quán", ${timeDisplay}${title} - ${blvName}\n`;
                                     m3u += `${safeLink}\n`;
@@ -174,7 +184,7 @@ app.get('/bongda.m3u', async (req, res) => {
                         m3u += `${safeSourceLink}\n`;
                     }
 
-                    // KÊNH BLV (Gép từ stream_key)
+                    // KÊNH BLV
                     let hdUrl = "";
                     if (match.stream_key) {
                         hdUrl = `https://pull.asynccdn.com/live/${match.stream_key}/index.m3u8`;
@@ -191,7 +201,6 @@ app.get('/bongda.m3u', async (req, res) => {
                     }
 
                     if (hdUrl && typeof hdUrl === 'string' && hdUrl.startsWith('http') && hdUrl !== match.source_live) {
-                        // Bọc link BLV qua Proxy
                         const safeHdLink = `https://${renderHost}/proxy?url=${encodeURIComponent(hdUrl)}&ref=${encodeURIComponent('https://sv2.tieulam1.xyz/')}`;
                         m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Tiêu Lâm TV", ${timeDisplay}${title} - ${safeBlv}\n`;
                         m3u += `${safeHdLink}\n`;
