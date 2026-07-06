@@ -1,39 +1,100 @@
-// DÒNG NÀY CỰC QUAN TRỌNG: Ép Node.js bỏ qua lỗi bảo mật SSL
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Chuỗi giả danh siêu cấp
-const fakeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-// =========================================================================
-// ROUTE PROXY: BỌC 100% CẢ M3U8, VIDEO (.TS) VÀ CHÌA KHÓA GIẢI MÃ
-// =========================================================================
-app.get('/proxy', async (req, res) => {
-    const targetUrl = req.query.url;
-    const referer = req.query.ref;
-    
-    if (!targetUrl) return res.status(400).send("Thiếu URL");
-
+app.get('/bongda.m3u', async (req, res) => {
     try {
-        let origin = "";
-        try { origin = new URL(referer).origin; } catch(e) {}
+        let m3u = "";
 
-        const response = await fetch(targetUrl, {
-            headers: {
-                'User-Agent': fakeUserAgent,
-                'Referer': referer,
-                ...(origin && {'Origin': origin})
+        // ==========================================
+        // 1. ĐỌC FILE TV TĨNH TỪ Ổ CỨNG (Nhanh & Không sợ block)
+        // ==========================================
+        try {
+            // Chỉ thẳng vào file bongda.m3u nằm cùng thư mục
+            const filePath = path.join(__dirname, 'bongda.m3u'); 
+            if (fs.existsSync(filePath)) {
+                m3u = fs.readFileSync(filePath, 'utf8');
+            } else {
+                m3u = "#EXTM3U\n";
             }
-        });
+        } catch (e) {
+            console.error("Lỗi đọc file local:", e);
+            m3u = "#EXTM3U\n";
+        }
         
-        if (!response.ok) return res.status(response.status).send("Lỗi tải luồng");
+        if (!m3u.endsWith('\n')) m3u += '\n';
 
-        // 1. NẾU LÀ CỤC VIDEO HAY CHÌA KHÓA -> BƠM THẲNG VỀ TIVI LUÔN
-        if (!targetUrl.includes('.m3u') && !targetUrl.includes('.m3u8')) {
-            const contentType = response.headers.get('content-type');
+        // ==========================================
+        // 2. CÀO DỮ LIỆU TỪ HỘI QUÁN
+        // ==========================================
+        try {
+            const resHQ = await fetch('https://sv.hoiquantv.xyz/api/v1/external/fixtures/unfinished', {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0' }
+            });
+            const dataHQ = await resHQ.json();
+
+            if (dataHQ.success && dataHQ.data) {
+                dataHQ.data.forEach(match => {
+                    const title = match.title;
+                    const logo = match.homeTeam ? match.homeTeam.logoUrl : "";
+                    
+                    let timeDisplay = "";
+                    if (match.startTime) {
+                        const dateObj = new Date(match.startTime);
+                        // Đổi sang giờ VN (GMT+7)
+                        const vnTime = new Date(dateObj.getTime() + (7 * 60 * 60 * 1000));
+                        const hours = String(vnTime.getUTCHours()).padStart(2, '0');
+                        const minutes = String(vnTime.getUTCMinutes()).padStart(2, '0');
+                        const day = String(vnTime.getUTCDate()).padStart(2, '0');
+                        const month = String(vnTime.getUTCMonth() + 1).padStart(2, '0');
+                        timeDisplay = `[${hours}:${minutes} ${day}/${month}] `;
+                    }
+
+                    if (match.fixtureCommentators && match.fixtureCommentators.length > 0) {
+                        match.fixtureCommentators.forEach(room => {
+                            if (room.commentator && room.commentator.streams && room.commentator.streams.length > 0) {
+                                const blvRaw = room.commentator.nickname || room.commentator.name;
+                                const blvName = (blvRaw && blvRaw !== "null") ? blvRaw : "BLV Hội Quán";
+                                
+                                let streamUrl = "";
+                                const hdStream = room.commentator.streams.find(s => s.name === "HD");
+                                if (hdStream) streamUrl = hdStream.sourceUrl;
+                                else if (room.commentator.streams.length > 1) streamUrl = room.commentator.streams[1].sourceUrl;
+                                else streamUrl = room.commentator.streams[0].sourceUrl;
+
+                                if (streamUrl && typeof streamUrl === 'string' && streamUrl.startsWith('http')) {
+                                    m3u += `#EXTINF:-1 tvg-logo="${logo}" group-title="Hội Quán", ${timeDisplay}${title} - ${blvName}\n`;
+                                    m3u += `#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0\n`;
+                                    m3u += `#EXTVLCOPT:http-referrer=https://sv.hoiquantv.xyz/\n`;
+                                    m3u += `${streamUrl}\n`;
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+        } catch (e) {
+            console.error("Lỗi cào Hội Quán:", e);
+        }
+
+        // ==========================================
+        // 3. XUẤT FILE CHO TIVI
+        // ==========================================
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+        res.setHeader('Content-Disposition', 'inline; filename="tong_hop.m3u"');
+        res.send(m3u);
+
+    } catch (error) {
+        console.error("Lỗi Server Tổng:", error);
+        res.status(500).send("Lỗi tạo playlist IPTV");
+    }
+});
+
+app.listen(PORT, () => {
+    console.log(`Server chạy tại port: ${PORT}`);
+});
             if (contentType) res.setHeader('Content-Type', contentType);
             
             // Dùng arrayBuffer để chuyển tiếp video
